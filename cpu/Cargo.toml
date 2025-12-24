@@ -1,0 +1,8 @@
+[package]
+name = "cpu"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Aquí está la clave: le decimos que 'memory' está en la carpeta de al lado
+memory = { path = "../memory" }

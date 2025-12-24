@@ -1,0 +1,17 @@
+[package]
+name = "display"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Usamos winit 0.28 porque es la que pixels 0.13 soporta establemente
+winit = "0.28.7"
+pixels = "0.13.0"
+winit_input_helper = "0.14.0" # Versión compatible con winit 0.28
+
+# Dependencias internas
+cpu = { path = "../cpu" }
+memory = { path = "../memory" }
+gpu = { path = "../gpu" }
+joypad = { path = "../joypad" } # Nombre correcto
+mbc = { path = "../mbc" }

@@ -1,0 +1,9 @@
+[package]
+name = "memory"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mbc = { path = "../mbc" }
+gpu = { path = "../gpu" }
+joypad = { path = "../joypad" }

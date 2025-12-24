@@ -1,0 +1,22 @@
+[package]
+name = "rust-gameboy"
+version = "0.1.0"
+edition = "2024"
+
+# Definimos el espacio de trabajo y sus carpetas
+[workspace]
+members = ["cpu", "memory", "mbc", "gpu", "display", "joypad"]
+
+# Aquí le decimos al ejecutable principal dónde encontrar cada pieza
+[dependencies]
+cpu = { path = "./cpu" }
+memory = { path = "./memory" }
+mbc = { path = "./mbc" }
+gpu = { path = "./gpu" }
+display = { path = "./display" }
+joypad = { path = "./joypad" }
+# Librerías para la interfaz gráfica
+pixels = "0.13.0"
+winit = "0.29.0"
+log = "0.4"
+env_logger = "0.10"
