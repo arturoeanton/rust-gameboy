@@ -236,12 +236,33 @@ impl Bus {
 
     fn write_gpu_register(&mut self, addr: u16, val: u8) {
         match addr {
-            0xFF40 => self.gpu.lcdc = val,
-            0xFF41 => self.gpu.stat = val,
+            0xFF40 => {
+                self.gpu.lcdc = val;
+                // Opcional: Si apagan el LCD, algunos emuladores resetean LY aquí mismo
+                // para ser más precisos, aunque tu gpu.step ya lo maneja.
+                if (val & 0x80) == 0 {
+                    self.gpu.ly = 0;
+                    self.gpu.stat &= 0xFC; // Forzar modo HBlank
+                    // self.gpu.cycles = 0; // Resetear reloj interno PPU
+                }
+            },
+            0xFF41 => {
+                // FIX CRÍTICO: STAT
+                // Los bits 0-2 son Read-Only (Mode flag + Coincidence flag).
+                // El juego solo puede tocar los bits 3-6 (Interrupt Enables).
+                self.gpu.stat = (self.gpu.stat & 0x07) | (val & 0xF8);
+            },
             0xFF42 => self.gpu.scy = val,
             0xFF43 => self.gpu.scx = val,
-            // 0xFF44 (LY) es Read-Only.
+            
+            0xFF44 => {
+                // FIX CRÍTICO: LY
+                // Es Read-Only. Escribir cualquier valor lo resetea a 0.
+                self.gpu.ly = 0; 
+            },
+            
             0xFF45 => self.gpu.lyc = val,
+            0xFF46 => self.perform_dma(val), // Este ya lo tenías bien aparte
             0xFF47 => self.gpu.bgp = val,
             0xFF48 => self.gpu.obp0 = val,
             0xFF49 => self.gpu.obp1 = val,

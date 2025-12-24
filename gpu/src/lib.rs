@@ -339,12 +339,17 @@ impl Gpu {
     }
 
     /// Escribe un píxel en el framebuffer lineal.
-    fn set_pixel(&mut self, x: usize, y: usize, color: [u8; 4]) {
+   fn set_pixel(&mut self, x: usize, y: usize, color: [u8; 4]) {
+        // --- GUARDIA DE SEGURIDAD ---
+        // Si intentamos dibujar fuera de la pantalla (ej: durante VBlank),
+        // simplemente ignoramos la orden en lugar de crashear el emulador.
+        if x >= SCREEN_WIDTH || y >= SCREEN_HEIGHT {
+            return;
+        }
+        
         let offset = (y * SCREEN_WIDTH + x) * 4;
-        // copy_from_slice es la forma eficiente de copiar arrays en Rust.
         self.frame_buffer[offset..offset+4].copy_from_slice(&color);
     }
-    
     // Helpers para manejo del Enum State
     fn get_mode(&self) -> Mode {
         // Mapeo seguro de u8 a Enum. Si hay un valor inválido, panic (unreachable).
