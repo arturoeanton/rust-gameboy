@@ -57,9 +57,18 @@ pub fn run(mut cpu: Cpu, mut bus: Bus) {
             while cycles_spent < CYCLES_PER_FRAME {
                 let cycles = cpu.step(&mut bus);
                 cycles_spent += cycles;
+
+               
                 
-                // Actualizar GPU (y Timers en el futuro)
+                // Actualizar GPU 
                 let frame_ready = bus.gpu.step(cycles);
+                 // Actualizar Timer ---
+                bus.step_timer(cycles);
+
+                // --- ¡FIX MARIO! Conectar interrupción LCD STAT ---
+                if bus.gpu.request_stat_interrupt {
+                    bus.interrupt_flag |= 0x02; // Bit 1: LCD STAT
+                }
                 
                 // Si la GPU dice "V-Blank", tenemos una imagen lista
                 if frame_ready {
