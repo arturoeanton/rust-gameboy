@@ -113,16 +113,76 @@ impl Gpu {
 
     // --- RENDERIZADO REAL (Adiós Gradiente) ---
 
+    // gpu/src/lib.rs
+
+    fn render_window(&mut self) {
+        // WY es la posición Y donde empieza la ventana
+        let wy = self.wy;
+        
+        // Si la línea actual (LY) es menor que WY, no hay ventana aquí.
+        if self.ly < wy { return; }
+
+        // WX es la posición X + 7.
+        let wx = self.wx;
+        let window_x_pos = wx.wrapping_sub(7);
+
+        // Mapa de Tiles de la Ventana: Bit 6 LCDC (0=9800, 1=9C00)
+        let map_base: u16 = if (self.lcdc & 0x40) != 0 { 0x1C00 } else { 0x1800 };
+
+        // Tipo de datos (Signed/Unsigned): Bit 4 LCDC
+        let use_unsigned_mode = (self.lcdc & 0x10) != 0;
+
+        // Calcular qué fila de la ventana estamos dibujando
+        let window_line = self.ly.wrapping_sub(wy);
+        let tile_row = (window_line % 8) as u16;
+        let tile_line_idx = (window_line / 8) as u16;
+
+        for x in 0..SCREEN_WIDTH {
+            // Si estamos a la izquierda del inicio de la ventana, saltamos
+            if (x as u8) < window_x_pos { continue; }
+
+            // Coordenada X relativa dentro de la ventana
+            let window_rel_x = (x as u8).wrapping_sub(window_x_pos);
+
+            let tile_col = (window_rel_x / 8) as u16;
+            let tile_map_addr = map_base + (tile_line_idx * 32) + tile_col;
+            let tile_id = self.vram[tile_map_addr as usize];
+
+            // Calcular dirección de datos (Misma lógica corregida que el BG)
+            let tile_data_addr = if use_unsigned_mode {
+                (tile_id as u16) * 16
+            } else {
+                let signed_id = (tile_id as i8) as i16;
+                (0x1000 + (signed_id * 16)) as u16
+            };
+
+            let byte1 = self.vram[(tile_data_addr + (tile_row * 2)) as usize];
+            let byte2 = self.vram[(tile_data_addr + (tile_row * 2) + 1) as usize];
+
+            let bit_idx = 7 - (window_rel_x % 8);
+            let lo = (byte1 >> bit_idx) & 1;
+            let hi = (byte2 >> bit_idx) & 1;
+            let color_id = (hi << 1) | lo;
+
+            let color = self.get_color(color_id, self.bgp);
+            
+            // La ventana siempre tapa al fondo
+            self.set_pixel(x, self.ly as usize, color);
+        }
+    }
     fn render_scanline(&mut self) {
-        // Bit 0 LCDC: Background Enable
+        // 1. Dibujar Fondo (Background)
         if (self.lcdc & 0x01) != 0 {
             self.render_background();
         }
-        
-        // Bit 5 LCDC: Window Enable (Opcional por ahora, Tetris no lo usa mucho)
-        // if (self.lcdc & 0x20) != 0 { self.render_window(); }
 
-        // Bit 1 LCDC: Sprites Enable (Para ver a Mario)
+        // 2. Dibujar Ventana (Window) - ¡NUEVO!
+        // Bit 5 LCDC: Habilita la ventana
+        if (self.lcdc & 0x20) != 0 {
+            self.render_window();
+        }
+
+        // 3. Dibujar Sprites
         if (self.lcdc & 0x02) != 0 {
             self.render_sprites();
         }
