@@ -2,8 +2,14 @@
 
 /// Interfaz (Trait) común para todos los tipos de cartuchos.
 /// Permite al Bus interactuar con el cartucho sin saber si es Tetris (simple) o Pokémon (complejo).
+///
+/// Concepto Rust vs Go:
+/// - Un `trait` en Rust es casi idéntico a una `interface` en Go.
+/// - Define un contrato de comportamiento.
+/// - `dyn Mbc` significa "Dynamic dispatch", indicando que el tipo exacto se resolverá en tiempo de ejecución.
 pub trait Mbc {
     fn read(&self, addr: u16) -> u8;
+    // &mut self indica que la escritura puede cambiar el estado interno del struct (ej: cambiar de banco).
     fn write(&mut self, addr: u16, val: u8);
 }
 
@@ -13,19 +19,22 @@ pub trait Mbc {
 // =========================================================================
 
 pub struct RomOnly {
+    // Vec<u8> es un array dinámico en el Heap (similar a una slice []byte en Go).
     pub rom: Vec<u8>,
 }
 
 impl Mbc for RomOnly {
     fn read(&self, addr: u16) -> u8 {
-        // Leemos directamente del array.
-        // Usamos .get().unwrap_or para evitar caídas si la CPU lee basura fuera de rango.
+        // Leemos directamente del vector.
+        // .get() devuelve Option<&u8>. Usamos unwrap_or para seguridad.
+        // * desreferencia el puntero &u8 a u8.
         *self.rom.get(addr as usize).unwrap_or(&0xFF)
     }
 
     fn write(&mut self, _addr: u16, _val: u8) {
         // En un cartucho simple, no hay registros de hardware.
         // Escribir en la ROM no hace nada.
+        // El guion bajo en _addr suprime el warning de "variable no usada".
     }
 }
 
@@ -36,10 +45,10 @@ impl Mbc for RomOnly {
 // =========================================================================
 
 pub struct Mbc1 {
-    rom: Vec<u8>,     // Datos del juego
-    ram: Vec<u8>,     // Datos de guardado (SRAM)
-    rom_bank: u8,     // Banco de ROM seleccionado actualmente
-    ram_bank: u8,     // Banco de RAM seleccionado actualmente
+    rom: Vec<u8>,     
+    ram: Vec<u8>,     
+    rom_bank: u8,     // Banco de ROM seleccionado actualmente (1-127)
+    ram_bank: u8,     // Banco de RAM seleccionado actualmente (0-3)
     ram_enabled: bool,// "Candado" de seguridad para la RAM
     banking_mode: u8, // Modo 0 (ROM Banking) o Modo 1 (RAM Banking)
 }
@@ -48,7 +57,8 @@ impl Mbc1 {
     pub fn new(rom: Vec<u8>) -> Self {
         Self {
             rom,
-            // Inicializamos 32KB de RAM llena de ceros
+            // Inicializamos 32KB de RAM llena de ceros.
+            // vec! es una macro para crear vectores rápidamente.
             ram: vec![0; 0x8000], 
             rom_bank: 1, // Por defecto, el banco conmutable empieza en el 1
             ram_bank: 0,
@@ -77,8 +87,7 @@ impl Mbc for Mbc1 {
                 let bank = self.rom_bank as usize;
                 // Fórmula: (Número de Banco * Tamaño Banco) + Offset dentro del banco
                 let offset = (bank * 0x4000) + (addr as usize - 0x4000);
-                // El % self.rom.len() es un truco de seguridad:
-                // Si el juego pide un banco que no existe, le damos el módulo para no crashear.
+                // El % self.rom.len() asegura que no leamos fuera del vector si el juego pide un banco fantasma.
                 self.rom[offset % self.rom.len()]
             }
 
@@ -91,11 +100,10 @@ impl Mbc for Mbc1 {
                     let offset = (self.ram_bank as usize * 0x2000) + (addr as usize - 0xA000);
                     self.ram[offset % self.ram.len()]
                 } else {
-                    0xFF // Si la RAM está bloqueada, el bus devuelve basura (Open Bus = FF)
+                    0xFF // Open Bus
                 }
             }
             
-            // Cualquier otra dirección no es responsabilidad del cartucho
             _ => 0xFF,
         }
     }
@@ -104,44 +112,40 @@ impl Mbc for Mbc1 {
         match addr {
             // ---------------------------------------------------------
             // 0x0000 - 0x1FFF: RAM Enable
-            // Escribir 0x0A (0000 1010) habilita la RAM. Cualquier otra cosa la bloquea.
-            // Esto se hace para evitar corromper los saves al apagar la consola.
+            // Escribir 0x0A habilita la RAM. Cualquier otra cosa la bloquea.
             // ---------------------------------------------------------
             0x0000..=0x1FFF => {
                 self.ram_enabled = (val & 0x0F) == 0x0A;
             }
 
             // ---------------------------------------------------------
-            // 0x2000 - 0x3FFF: ROM Bank Number (Bits bajos)
+            // 0x2000 - 0x3FFF: ROM Bank Number
             // Selecciona los 5 bits inferiores del banco de ROM.
             // ---------------------------------------------------------
             0x2000..=0x3FFF => {
-                let mut bank = val & 0x1F; // Mascara de 5 bits
-                if bank == 0 { bank = 1; } // El hardware físico no puede mapear el banco 0 aquí.
+                let mut bank = val & 0x1F; 
+                if bank == 0 { bank = 1; } // El banco 0 no se mapea aquí, se convierte en 1.
                 
-                // Mantenemos los bits altos (mask 0x60) y cambiamos los bajos.
+                // Mantenemos los bits altos y cambiamos los bajos.
                 self.rom_bank = (self.rom_bank & 0x60) | bank;
             }
 
             // ---------------------------------------------------------
-            // 0x4000 - 0x5FFF: RAM Bank Number o ROM Bank (Bits altos)
-            // Este registro hace dos cosas dependiendo del "Banking Mode".
+            // 0x4000 - 0x5FFF: RAM Bank Number / ROM Bank High
             // ---------------------------------------------------------
             0x4000..=0x5FFF => {
-                let bits = val & 0x03; // Solo importan los 2 primeros bits
+                let bits = val & 0x03;
                 if self.banking_mode == 0 {
-                    // Modo ROM (Defecto): Los bits se usan para bancos de ROM > 31 (ej. bank 32, 64)
+                    // Modo ROM: Son bits altos para el número de banco ROM
                     self.rom_bank = (self.rom_bank & 0x1F) | (bits << 5);
                 } else {
-                    // Modo RAM: Selecciona el banco de RAM externa (0-3)
+                    // Modo RAM: Selecciona banco de RAM
                     self.ram_bank = bits;
                 }
             }
 
             // ---------------------------------------------------------
             // 0x6000 - 0x7FFF: Banking Mode Select
-            // 0 = Modo ROM (16MB ROM / 8KB RAM) - Lo más común.
-            // 1 = Modo RAM (4MB ROM / 32KB RAM).
             // ---------------------------------------------------------
             0x6000..=0x7FFF => {
                 self.banking_mode = val & 0x01;
@@ -164,25 +168,26 @@ impl Mbc for Mbc1 {
 }
 
 // =========================================================================
-//  FACTORY: EL DETECTOR DE CARTUCHOS
-//  Esta función DEBE ser pública (pub) para que main.rs pueda usarla.
+//  FACTORY: DETECTOR DE CARTUCHOS
+//  En Rust, el polimorfismo de retorno se logra con Box<dyn Trait>.
+//  Devolvemos un puntero a "algo que implementa Mbc".
 // =========================================================================
 
 pub fn new_cartridge(data: Vec<u8>) -> Box<dyn Mbc> {
-    // La dirección 0x0147 del header contiene el ID del tipo de cartucho
-    let cartridge_type = data.get(0x0147).unwrap_or(&0);
+    // Leemos el byte 0x147 del header para identificar el tipo.
+    let cartridge_type = *data.get(0x0147).unwrap_or(&0);
 
     match cartridge_type {
-        // ID 0x00: ROM ONLY (Tetris usa este)
         0x00 => Box::new(RomOnly { rom: data }),
-
-        // ID 0x01 a 0x03: MBC1 (Con o sin RAM/Batería)
+        
+        // MBC1 es el más común (Mario Land, Tetris, Zelda).
         0x01 | 0x02 | 0x03 => Box::new(Mbc1::new(data)),
 
-        // Fallback: Si no conocemos el chip, intentamos correrlo como MBC1
-        // (Muchos juegos funcionan así aunque no sea exacto)
+        // MBC3 (Pokemon Red/Blue) - Usaremos MBC1 como fallback por ahora.
+        // 0x11 | 0x12 | 0x13 => Box::new(Mbc3::new(data)),
+
         _ => {
-            println!("Cartucho tipo {:#04X} no implementado oficialmente. Usando MBC1.", cartridge_type);
+            println!("Tipo de cartucho {:#04X} no soportado oficialmente. Usando fallback a MBC1.", cartridge_type);
             Box::new(Mbc1::new(data))
         }
     }
